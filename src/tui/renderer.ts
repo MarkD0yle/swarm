@@ -2,6 +2,17 @@ import chalk, { type ChalkInstance } from 'chalk';
 import { AgentState, AgentResult, Round2Result, FinalReport } from '../types';
 import { theme } from './theme';
 import { PERSONAS } from '../agents/personas';
+import { redactApiKeyFromText } from '../openaiUtil';
+
+const ERROR_STATUS_MAX_LEN = 44;
+
+function safeErrorSnippet(raw: string | undefined): string {
+  if (!raw) return 'error occurred';
+  const redacted = redactApiKeyFromText(raw);
+  return redacted.length <= ERROR_STATUS_MAX_LEN
+    ? redacted
+    : `${redacted.slice(0, ERROR_STATUS_MAX_LEN - 1)}…`;
+}
 
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const BOX_WIDTH = 62;
@@ -135,7 +146,7 @@ export class Renderer {
         const count = agent.issueCount ?? 0;
         return theme.done(`${count} item${count !== 1 ? 's' : ''}`);
       case 'error':
-        return theme.error(agent.error ?? 'error occurred');
+        return theme.error(safeErrorSnippet(agent.error));
     }
   }
 
@@ -162,7 +173,7 @@ export class Renderer {
       console.log(theme.gray('─'.repeat(54)));
 
       if (result.error) {
-        console.log(theme.error(`  Error: ${result.error}`));
+        console.log(theme.error(`  Error: ${redactApiKeyFromText(result.error)}`));
         continue;
       }
 
@@ -192,7 +203,7 @@ export class Renderer {
       console.log(theme.gray('─'.repeat(54)));
 
       if (r.error) {
-        console.log(theme.error(`  Error: ${r.error}`));
+        console.log(theme.error(`  Error: ${redactApiKeyFromText(r.error)}`));
         continue;
       }
 

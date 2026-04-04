@@ -1,16 +1,42 @@
 import fs from 'fs';
 import path from 'path';
 import OpenAI from 'openai';
-import { SwarmOptions, ReviewResult, AgentState, AgentResult, Round2Result } from './types';
+import {
+  SwarmOptions,
+  ReviewResult,
+  AgentState,
+  AgentResult,
+  Round2Result,
+  ReviewContent,
+} from './types';
 import { PERSONAS } from './agents/personas';
 import { PersonaAgent } from './agents/personaAgent';
 import { FinalReportAgent } from './agents/finalReport';
 import { Renderer } from './tui/renderer';
 import { theme } from './tui/theme';
+import { validateOpenAIKey } from './openaiUtil';
 
 /** Cap peer digest size — Round 2 does not resend full file (see plan). */
 const MAX_ISSUES_PER_PEER_DIGEST = 12;
 const PEER_DESCRIPTION_MAX_CHARS = 160;
+
+const IMAGE_EXT_TO_MIME: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+};
+
+function loadReviewContent(resolvedPath: string): ReviewContent {
+  const ext = path.extname(resolvedPath).toLowerCase();
+  const mime = IMAGE_EXT_TO_MIME[ext];
+  if (mime) {
+    const buf = fs.readFileSync(resolvedPath);
+    return { kind: 'image', mimeType: mime, base64: buf.toString('base64') };
+  }
+  return { kind: 'code', text: fs.readFileSync(resolvedPath, 'utf-8') };
+}
 
 function truncateOneLine(s: string, max: number): string {
   const t = s.replace(/\s+/g, ' ').trim();
@@ -51,7 +77,7 @@ export class Orchestrator {
   private model: string;
 
   constructor(options: SwarmOptions) {
-    this.client = new OpenAI({ apiKey: options.apiKey });
+    this.client = new OpenAI({ apiKey: options.apiKey.trim() });
     this.model = options.model ?? 'gpt-4o';
   }
 
@@ -66,7 +92,9 @@ export class Orchestrator {
     if (!fs.existsSync(resolvedPath)) {
       throw new Error(`File not found: ${resolvedPath}`);
     }
-    const fileContent = fs.readFileSync(resolvedPath, 'utf-8');
+    const reviewContent = loadReviewContent(resolvedPath);
+
+    await validateOpenAIKey(this.client);
 
     const personaAgents = PERSONAS.map((p) => new PersonaAgent(this.client, this.model, p));
     const finalReportAgent = new FinalReportAgent(this.client, this.model);
@@ -85,7 +113,7 @@ export class Orchestrator {
 
     const round1: AgentResult[] = await Promise.all(
       personaAgents.map(async (agent) => {
-        const result = await agent.analyze(fileContent, resolvedPath);
+        const result = await agent.analyze(reviewContent, resolvedPath);
         if (result.error) {
           renderer1.updateAgent(agent.agentName, { status: 'error', error: result.error });
         } else {

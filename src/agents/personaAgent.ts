@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { AgentResult, Issue, Round2Result } from '../types';
 import { PersonaDefinition, getPersonaReviewSystemPrompt, getPersonaRound2SystemPrompt } from './personas';
 import { BaseAgent } from './base';
+import { redactApiKeyFromText } from '../openaiUtil';
 
 export class PersonaAgent extends BaseAgent {
   readonly agentName: string;
@@ -74,7 +75,7 @@ Return ONLY the JSON object specified in your instructions.`;
         agreements: [],
         disagreements: [],
         additionalFindings: [],
-        error: message,
+        error: redactApiKeyFromText(message),
       };
     }
   }

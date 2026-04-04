@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { AgentResult, Round2Result, FinalReport } from '../types';
+import { redactApiKeyFromText } from '../openaiUtil';
 
 const MAX_RANKED = 18;
 
@@ -13,10 +14,13 @@ export class FinalReportAgent {
   }
 
   async build(round1: AgentResult[], round2: Round2Result[], filePath: string): Promise<FinalReport> {
-    const systemPrompt = `You are an independent lead reviewer consolidating a 3-round internal review of UI code at an institutional finance firm (State Street–style personas).
+    const isScreenshot = /\.(png|jpe?g|webp|gif)$/i.test(filePath);
+    const artifact = isScreenshot ? 'UI screenshot' : 'source file';
+
+    const systemPrompt = `You are an independent lead reviewer consolidating a 3-round internal review of UI work (code or screenshots) at an institutional finance firm (State Street–style personas).
 
 You receive:
-- Round 1: each persona's issue list from reviewing the same source file.
+- Round 1: each persona's issue list from reviewing the same ${artifact}.
 - Round 2: each persona's agreements, disagreements with peers, additional findings, and optional voice notes.
 
 Produce a single actionable final report for engineering and design leads.
@@ -102,7 +106,7 @@ Return ONLY valid JSON:
       })
       .join('\n\n');
 
-    const userMessage = `File reviewed: ${filePath}
+    const userMessage = `${isScreenshot ? 'Screenshot' : 'File'} reviewed: ${filePath}
 
 ## Round 1 (all personas)
 
@@ -138,7 +142,7 @@ Produce the final JSON report.`;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return {
-        summary: `Final report failed: ${message}`,
+        summary: `Final report failed: ${redactApiKeyFromText(message)}`,
         rankedIssues: [],
         interactionHighlights: [],
       };
