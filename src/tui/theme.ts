@@ -1,4 +1,4 @@
-import chalk from 'chalk';
+import chalk, { type ChalkInstance } from 'chalk';
 
 // We need to handle chalk v5 ESM in a CommonJS context
 // chalk v5 is ESM-only, so we use a dynamic import wrapper approach
@@ -20,12 +20,26 @@ export const theme = {
   done: chalk.hex('#2ED573'),
   error: chalk.hex('#FF4757'),
 
-  // Agent name colors
-  accessibility: chalk.hex('#A29BFE').bold,
-  ux: chalk.hex('#FD79A8').bold,
-  component: chalk.hex('#FDCB6E').bold,
-  styling: chalk.hex('#74B9FF').bold,
-  synthesizer: chalk.hex('#00CEC9').bold,
+  /** Stable color per persona id (SS-001 …) — like assigning a stroke color per variant in Figma. */
+  agentColorForId(id: string): ChalkInstance {
+    const palette = [
+      '#A29BFE',
+      '#FD79A8',
+      '#FDCB6E',
+      '#74B9FF',
+      '#00CEC9',
+      '#FF7675',
+      '#55EFC4',
+      '#FAB1A0',
+      '#E17055',
+      '#636E72',
+    ];
+    let h = 0;
+    for (let i = 0; i < id.length; i++) {
+      h = (h * 31 + id.charCodeAt(i)) >>> 0;
+    }
+    return chalk.hex(palette[h % palette.length]).bold;
+  },
 
   // General
   dim: chalk.dim,

@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import path from 'path';
 import fs from 'fs';
 import { Orchestrator } from './orchestrator';
+import { finalReportToMarkdown, writeReportFile } from './reportWriter';
 
 // Load .env if present
 const envPath = path.resolve(process.cwd(), '.env');
@@ -36,7 +37,8 @@ program
   .description('Run a multi-agent review on a UI component file')
   .option('--api-key <key>', 'OpenAI API key (overrides OPENAI_API_KEY env var)')
   .option('--model <model>', 'OpenAI model to use', 'gpt-4o')
-  .action(async (file: string, options: { apiKey?: string; model?: string }) => {
+  .option('--out <path>', 'Write final report as Markdown to this path')
+  .action(async (file: string, options: { apiKey?: string; model?: string; out?: string }) => {
     const apiKey = options.apiKey ?? process.env['OPENAI_API_KEY'];
 
     if (!apiKey) {
@@ -59,7 +61,19 @@ program
     });
 
     try {
-      await orchestrator.review(resolvedFile);
+      const result = await orchestrator.review(resolvedFile);
+
+      if (options.out) {
+        const md = finalReportToMarkdown(
+          result.file,
+          result.round1,
+          result.round2,
+          result.finalReport
+        );
+        writeReportFile(options.out, md);
+        console.log(`\nReport written to ${path.resolve(options.out)}\n`);
+      }
+
       process.exit(0);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

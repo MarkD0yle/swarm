@@ -1,9 +1,15 @@
 import chalk, { type ChalkInstance } from 'chalk';
-import { AgentState, AgentResult, SynthesisResult } from '../types';
+import { AgentState, AgentResult, Round2Result, FinalReport } from '../types';
 import { theme } from './theme';
+import { PERSONAS } from '../agents/personas';
 
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-const BOX_WIDTH = 56;
+const BOX_WIDTH = 62;
+
+function displayNameForId(id: string): string {
+  const p = PERSONAS.find((x) => x.id === id);
+  return p ? `${p.id} ${p.displayName.split(' ')[0]}` : id;
+}
 
 export class Renderer {
   private spinnerFrame = 0;
@@ -11,10 +17,12 @@ export class Renderer {
   private agentStates: AgentState[] = [];
   private panelLineCount = 0;
   private fileName = '';
+  private phaseLabel = 'Review';
   private rendered = false;
 
-  constructor(fileName: string) {
+  constructor(fileName: string, phaseLabel = 'Review') {
     this.fileName = fileName;
+    this.phaseLabel = phaseLabel;
   }
 
   setAgents(agents: AgentState[]): void {
@@ -22,7 +30,6 @@ export class Renderer {
   }
 
   start(): void {
-    // Hide cursor
     process.stdout.write('\x1B[?25l');
 
     this.spinnerInterval = setInterval(() => {
@@ -42,7 +49,6 @@ export class Renderer {
 
   private refresh(): void {
     if (!this.rendered) return;
-    // Move cursor up to overwrite the panel
     process.stdout.write(`\x1B[${this.panelLineCount}A`);
     this.renderPanel();
   }
@@ -50,31 +56,27 @@ export class Renderer {
   private renderPanel(): void {
     const lines: string[] = [];
 
-    const title = ` Swarm — ${this.fileName} `;
-    const innerWidth = BOX_WIDTH - 2; // subtract 2 for border chars
+    const title = ` Swarm — ${this.phaseLabel} — ${this.fileName} `;
+    const innerWidth = BOX_WIDTH - 2;
 
-    // Top border
     const titleLine = this.buildTitleLine(title, innerWidth);
     lines.push(theme.boxBorder(titleLine));
 
-    // Agent rows
     for (const agent of this.agentStates) {
       lines.push(this.renderAgentRow(agent, innerWidth));
     }
 
-    // Bottom border
     lines.push(theme.boxBorder('└' + '─'.repeat(innerWidth) + '┘'));
 
     const output = lines.join('\n') + '\n';
     process.stdout.write(output);
-    this.panelLineCount = lines.length + 1; // +1 for the trailing newline
+    this.panelLineCount = lines.length + 1;
     this.rendered = true;
   }
 
   private buildTitleLine(title: string, innerWidth: number): string {
-    // ┌─ Swarm — dashboard.tsx ──────────────────────────┐
     const stripped = title;
-    const dashesAfter = innerWidth - 2 - stripped.length; // 2 for "─ " prefix
+    const dashesAfter = innerWidth - 2 - stripped.length;
     const rightDashes = Math.max(0, dashesAfter);
     return '┌─' + stripped + '─'.repeat(rightDashes) + '┐';
   }
@@ -84,18 +86,14 @@ export class Renderer {
     const agentLabel = this.getAgentLabel(agent);
     const statusText = this.getStatusText(agent);
 
-    // Measure visible widths using stripped strings, pad raw strings, then apply color
-    const nameWidth = 16;
+    const nameWidth = 22;
     const visibleIcon = this.stripAnsi(icon);
-    const visibleName = agent.name;
+    const visibleName = displayNameForId(agent.name);
     const visibleStatus = this.stripAnsi(statusText);
 
-    // Pad the plain name to nameWidth before colorizing
     const paddedVisibleName = visibleName.padEnd(nameWidth);
-    // Re-apply color to the padded name
     const coloredPaddedName = agentLabel + ' '.repeat(Math.max(0, nameWidth - visibleName.length));
 
-    // Compute visible content length: "  {icon} {paddedName} {status}"
     const visibleLen = 2 + visibleIcon.length + 1 + paddedVisibleName.length + 1 + visibleStatus.length;
     const padRight = Math.max(0, innerWidth - visibleLen);
 
@@ -120,14 +118,8 @@ export class Renderer {
   }
 
   private getAgentLabel(agent: AgentState): string {
-    const colors: Record<string, ChalkInstance> = {
-      Accessibility: theme.accessibility,
-      UX: theme.ux,
-      Component: theme.component,
-      Styling: theme.styling,
-    };
-    const colorFn = colors[agent.name] || chalk.white;
-    return colorFn(agent.name);
+    const colorFn: ChalkInstance = theme.agentColorForId(agent.name);
+    return colorFn(displayNameForId(agent.name));
   }
 
   private getStatusText(agent: AgentState): string {
@@ -141,7 +133,7 @@ export class Renderer {
           return theme.error('error occurred');
         }
         const count = agent.issueCount ?? 0;
-        return theme.done(`${count} issue${count !== 1 ? 's' : ''} found`);
+        return theme.done(`${count} item${count !== 1 ? 's' : ''}`);
       case 'error':
         return theme.error(agent.error ?? 'error occurred');
     }
@@ -157,26 +149,17 @@ export class Renderer {
       clearInterval(this.spinnerInterval);
       this.spinnerInterval = null;
     }
-    // Final render with all done states
     this.refresh();
-    // Show cursor
     process.stdout.write('\x1B[?25h');
     process.stdout.write('\n');
   }
 
   printFindings(agentResults: AgentResult[]): void {
-    const agentColors: Record<string, ChalkInstance> = {
-      Accessibility: theme.accessibility,
-      UX: theme.ux,
-      Component: theme.component,
-      Styling: theme.styling,
-    };
-
     for (const result of agentResults) {
-      const colorFn = agentColors[result.agentName] || chalk.white;
-      const header = colorFn(`\n● ${result.agentName} Agent`);
-      console.log(header);
-      console.log(theme.gray('─'.repeat(50)));
+      const colorFn = theme.agentColorForId(result.agentName);
+      const label = displayNameForId(result.agentName);
+      console.log(colorFn(`\n● ${label}`));
+      console.log(theme.gray('─'.repeat(54)));
 
       if (result.error) {
         console.log(theme.error(`  Error: ${result.error}`));
@@ -198,13 +181,67 @@ export class Renderer {
     }
   }
 
-  printSynthesis(synthesis: SynthesisResult): void {
-    console.log(theme.sectionHeader('\n◆ Synthesis — Ranked Issues'));
-    console.log(theme.gray('─'.repeat(50)));
-    console.log(theme.dim(synthesis.summary));
+  printRound2(results: Round2Result[]): void {
+    console.log(theme.sectionHeader('\n◆ Round 2 — peer reactions'));
+    console.log(theme.gray('─'.repeat(54)));
+
+    for (const r of results) {
+      const colorFn = theme.agentColorForId(r.personaId);
+      const label = displayNameForId(r.personaId);
+      console.log(colorFn(`\n● ${label}`));
+      console.log(theme.gray('─'.repeat(54)));
+
+      if (r.error) {
+        console.log(theme.error(`  Error: ${r.error}`));
+        continue;
+      }
+
+      if (r.voiceNote) {
+        console.log(theme.dim(`  "${r.voiceNote}"`));
+        console.log();
+      }
+
+      if (r.agreements.length === 0 && r.disagreements.length === 0 && r.additionalFindings.length === 0) {
+        console.log(theme.dim('  No structured reactions.'));
+        continue;
+      }
+
+      for (const a of r.agreements) {
+        console.log(theme.done(`  ✓ Agrees with ${a.withPersonaId} on "${a.aboutTitle}"`));
+        console.log(`     ${theme.dim(a.comment)}`);
+        console.log();
+      }
+      for (const d of r.disagreements) {
+        console.log(theme.high(`  ✗ Disputes ${d.withPersonaId} on "${d.aboutTitle}"`));
+        console.log(`     ${theme.dim(d.reason)}`);
+        console.log();
+      }
+      for (const issue of r.additionalFindings) {
+        const badge = theme.severityBadge(issue.severity);
+        const lineInfo = issue.line ? theme.dim(` (line ${issue.line})`) : '';
+        console.log(`  ${badge} ${chalk.white.bold(issue.title)}${lineInfo} (additional)`);
+        console.log(`     ${theme.dim(issue.description)}`);
+        console.log();
+      }
+    }
+  }
+
+  printFinalReport(report: FinalReport): void {
+    console.log(theme.sectionHeader('\n◆ Final report'));
+    console.log(theme.gray('─'.repeat(54)));
+    console.log(theme.dim(report.summary));
     console.log();
 
-    for (const issue of synthesis.rankedIssues) {
+    if (report.interactionHighlights.length > 0) {
+      console.log(chalk.bold.white('Interaction highlights'));
+      for (const h of report.interactionHighlights) {
+        const tag = h.kind === 'agreement' ? theme.done('[agree]') : theme.medium('[tension]');
+        console.log(`  ${tag} ${theme.dim(h.personas)} — ${h.summary}`);
+      }
+      console.log();
+    }
+
+    for (const issue of report.rankedIssues) {
       const badge = theme.severityBadge(issue.severity);
       const rank = chalk.bold.white(`#${issue.rank}`);
       const source = theme.dim(`[${issue.source}]`);
