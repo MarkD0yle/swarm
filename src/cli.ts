@@ -5,6 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import { Orchestrator } from './orchestrator';
 import { finalReportToMarkdown, writeReportFile } from './reportWriter';
+import { redactApiKeyFromText } from './openaiUtil';
 
 // Load .env if present
 const envPath = path.resolve(process.cwd(), '.env');
@@ -34,12 +35,13 @@ program
 
 program
   .command('review <file>')
-  .description('Run a multi-agent review on a UI component file')
+  .description('Run a multi-agent review on a UI component file or screenshot (.png, .jpg, .webp, .gif)')
   .option('--api-key <key>', 'OpenAI API key (overrides OPENAI_API_KEY env var)')
   .option('--model <model>', 'OpenAI model to use', 'gpt-4o')
   .option('--out <path>', 'Write final report as Markdown to this path')
   .action(async (file: string, options: { apiKey?: string; model?: string; out?: string }) => {
-    const apiKey = options.apiKey ?? process.env['OPENAI_API_KEY'];
+    const rawKey = options.apiKey ?? process.env['OPENAI_API_KEY'];
+    const apiKey = typeof rawKey === 'string' ? rawKey.trim() : rawKey;
 
     if (!apiKey) {
       console.error(
@@ -77,7 +79,7 @@ program
       process.exit(0);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`\nError: ${message}\n`);
+      console.error(`\nError: ${redactApiKeyFromText(message)}\n`);
       process.exit(1);
     }
   });

@@ -16,6 +16,7 @@ export class Swarm {
 // Re-export all types for consumers
 export type {
   SwarmOptions,
+  ReviewContent,
   ReviewResult,
   AgentResult,
   SynthesisResult,

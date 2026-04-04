@@ -10,6 +10,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "ts-node src/cli.ts",
+    "review": "ts-node src/cli.ts review",
     "clean": "rm -rf dist"
   },
   "dependencies": {

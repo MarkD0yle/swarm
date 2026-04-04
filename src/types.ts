@@ -1,3 +1,8 @@
+/** What Round 1 sends to the model: component source or a UI screenshot. */
+export type ReviewContent =
+  | { kind: 'code'; text: string }
+  | { kind: 'image'; mimeType: string; base64: string };
+
 export type IssueSeverity = 'high' | 'medium' | 'low';
 
 export interface Issue {
