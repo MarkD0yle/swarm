@@ -51,6 +51,9 @@ export interface AgentState {
 
 export interface SwarmOptions {
   apiKey: string;
+  /** 'openai' or 'anthropic'. Auto-detected from key prefix if omitted (sk-ant- → anthropic). */
+  provider?: 'openai' | 'anthropic';
+  /** Model override. Defaults to gpt-4o (OpenAI) or claude-sonnet-4-6 (Anthropic). */
   model?: string;
   verbose?: boolean;
 }

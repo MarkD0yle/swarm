@@ -1,23 +1,21 @@
-import OpenAI from 'openai';
+import { LLMProvider } from '../provider';
 import { AgentResult, Round2Result, FinalReport } from '../types';
 import { redactApiKeyFromText } from '../openaiUtil';
 
 const MAX_RANKED = 18;
 
 export class FinalReportAgent {
-  private client: OpenAI;
-  private model: string;
+  private provider: LLMProvider;
 
-  constructor(client: OpenAI, model: string = 'gpt-4o') {
-    this.client = client;
-    this.model = model;
+  constructor(provider: LLMProvider) {
+    this.provider = provider;
   }
 
   async build(round1: AgentResult[], round2: Round2Result[], filePath: string): Promise<FinalReport> {
     const isScreenshot = /\.(png|jpe?g|webp|gif)$/i.test(filePath);
     const artifact = isScreenshot ? 'UI screenshot' : 'source file';
 
-    const systemPrompt = `You are an independent lead reviewer consolidating a 3-round internal review of UI work (code or screenshots) at an institutional finance firm (State Street–style personas).
+    const system = `You are an independent lead reviewer consolidating a 3-round internal review of UI work (code or screenshots) at an institutional finance firm (State Street–style personas).
 
 You receive:
 - Round 1: each persona's issue list from reviewing the same ${artifact}.
@@ -55,12 +53,8 @@ Return ONLY valid JSON:
 
     const r1 = round1
       .map((r) => {
-        if (r.error) {
-          return `=== ${r.agentName} ===\nError: ${r.error}`;
-        }
-        if (r.issues.length === 0) {
-          return `=== ${r.agentName} ===\nNo issues.`;
-        }
+        if (r.error) return `=== ${r.agentName} ===\nError: ${r.error}`;
+        if (r.issues.length === 0) return `=== ${r.agentName} ===\nNo issues.`;
         const lines = r.issues.map(
           (i, n) =>
             `${n + 1}. [${i.severity}] ${i.title}${i.line != null ? ` L${i.line}` : ''}\n   ${i.description}`
@@ -71,37 +65,30 @@ Return ONLY valid JSON:
 
     const r2 = round2
       .map((r) => {
-        if (r.error) {
-          return `=== ${r.personaId} Round2 ===\nError: ${r.error}`;
-        }
+        if (r.error) return `=== ${r.personaId} Round2 ===\nError: ${r.error}`;
         const parts: string[] = [];
-        if (r.voiceNote) {
-          parts.push(`Voice: ${r.voiceNote}`);
-        }
-        if (r.agreements.length) {
+        if (r.voiceNote) parts.push(`Voice: ${r.voiceNote}`);
+        if (r.agreements.length)
           parts.push(
             'Agreements:\n' +
               r.agreements
                 .map((a) => `  - with ${a.withPersonaId} on "${a.aboutTitle}": ${a.comment}`)
                 .join('\n')
           );
-        }
-        if (r.disagreements.length) {
+        if (r.disagreements.length)
           parts.push(
             'Disagreements:\n' +
               r.disagreements
                 .map((d) => `  - with ${d.withPersonaId} on "${d.aboutTitle}": ${d.reason}`)
                 .join('\n')
           );
-        }
-        if (r.additionalFindings.length) {
+        if (r.additionalFindings.length)
           parts.push(
             'Additional:\n' +
               r.additionalFindings
                 .map((i) => `  - [${i.severity}] ${i.title}: ${i.description}`)
                 .join('\n')
           );
-        }
         return `=== ${r.personaId} Round2 ===\n${parts.join('\n\n') || '(no structured reactions)'}`;
       })
       .join('\n\n');
@@ -119,21 +106,8 @@ ${r2}
 Produce the final JSON report.`;
 
     try {
-      const response = await this.client.chat.completions.create({
-        model: this.model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userMessage },
-        ],
-        temperature: 0.2,
-        response_format: { type: 'json_object' },
-      });
-
-      const content =
-        response.choices[0]?.message?.content ??
-        '{"summary":"","rankedIssues":[],"interactionHighlights":[]}';
-      const parsed = JSON.parse(content) as FinalReport;
-
+      const raw = await this.provider.complete(system, userMessage);
+      const parsed = JSON.parse(raw) as FinalReport;
       return {
         summary: parsed.summary ?? '',
         rankedIssues: parsed.rankedIssues ?? [],

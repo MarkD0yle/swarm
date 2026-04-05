@@ -1,25 +1,35 @@
 {
-  "name": "swarm",
-  "version": "1.0.0",
-  "description": "Multi-agent UI code review tool for the terminal",
+  "name": "swarmui",
+  "version": "1.1.0",
+  "description": "Multi-agent UI code review tool — runs 10 institutional-persona agents in parallel via OpenAI or Anthropic",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "bin": {
-    "swarm": "dist/cli.js"
+    "swarmui": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
+    "clean": "rm -rf dist",
     "dev": "ts-node src/cli.ts",
     "review": "ts-node src/cli.ts review",
-    "clean": "rm -rf dist"
+    "prepublishOnly": "npm run clean && npm run build"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.82.0",
     "boxen": "^7.1.1",
     "chalk": "^5.3.0",
     "commander": "^11.1.0",
     "dotenv": "^16.3.1",
-    "openai": "^4.28.0",
-    "ora": "^7.0.1"
+    "openai": "^4.28.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.5",
