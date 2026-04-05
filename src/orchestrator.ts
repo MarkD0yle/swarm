@@ -1,6 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import OpenAI from 'openai';
 import {
   SwarmOptions,
   ReviewResult,
@@ -9,14 +8,16 @@ import {
   Round2Result,
   ReviewContent,
 } from './types';
+import { LLMProvider } from './provider';
+import { OpenAIProvider } from './providers/openaiProvider';
+import { AnthropicProvider } from './providers/anthropicProvider';
 import { PERSONAS } from './agents/personas';
 import { PersonaAgent } from './agents/personaAgent';
 import { FinalReportAgent } from './agents/finalReport';
 import { Renderer } from './tui/renderer';
 import { theme } from './tui/theme';
-import { validateOpenAIKey } from './openaiUtil';
 
-/** Cap peer digest size — Round 2 does not resend full file (see plan). */
+/** Cap peer digest size — Round 2 does not resend the full file. */
 const MAX_ISSUES_PER_PEER_DIGEST = 12;
 const PEER_DESCRIPTION_MAX_CHARS = 160;
 
@@ -27,6 +28,19 @@ const IMAGE_EXT_TO_MIME: Record<string, string> = {
   '.webp': 'image/webp',
   '.gif': 'image/gif',
 };
+
+function detectProvider(apiKey: string, explicit?: 'openai' | 'anthropic'): 'openai' | 'anthropic' {
+  if (explicit) return explicit;
+  return apiKey.trim().startsWith('sk-ant-') ? 'anthropic' : 'openai';
+}
+
+function createProvider(options: SwarmOptions): LLMProvider {
+  const providerName = detectProvider(options.apiKey, options.provider);
+  if (providerName === 'anthropic') {
+    return new AnthropicProvider(options.apiKey, options.model);
+  }
+  return new OpenAIProvider(options.apiKey, options.model);
+}
 
 function loadReviewContent(resolvedPath: string): ReviewContent {
   const ext = path.extname(resolvedPath).toLowerCase();
@@ -43,13 +57,10 @@ function truncateOneLine(s: string, max: number): string {
   return t.length <= max ? t : `${t.slice(0, max - 1)}…`;
 }
 
-/** Build text digest of all peers' Round 1 issues for one persona's Round 2 call. */
 function buildPeerDigest(results: AgentResult[], excludePersonaId: string): string {
   const chunks: string[] = [];
   for (const r of results) {
-    if (r.agentName === excludePersonaId) {
-      continue;
-    }
+    if (r.agentName === excludePersonaId) continue;
     if (r.error) {
       chunks.push(`=== ${r.agentName} ===\n(Error: ${r.error})`);
       continue;
@@ -73,17 +84,15 @@ function buildPeerDigest(results: AgentResult[], excludePersonaId: string): stri
 }
 
 export class Orchestrator {
-  private client: OpenAI;
-  private model: string;
+  private provider: LLMProvider;
 
   constructor(options: SwarmOptions) {
-    this.client = new OpenAI({ apiKey: options.apiKey.trim() });
-    this.model = options.model ?? 'gpt-4o';
+    this.provider = createProvider(options);
   }
 
   /**
    * 3-round review: R1 = 10 parallel full-file persona reviews; R2 = 10 parallel peer reactions;
-   * R3 = one consolidated report. Cost: 21 LLM calls per file (future: optional --personas subset).
+   * R3 = one consolidated report. Total: 21 LLM calls per file.
    */
   async review(filePath: string): Promise<ReviewResult> {
     const resolvedPath = path.resolve(filePath);
@@ -94,10 +103,10 @@ export class Orchestrator {
     }
     const reviewContent = loadReviewContent(resolvedPath);
 
-    await validateOpenAIKey(this.client);
+    await this.provider.validateKey();
 
-    const personaAgents = PERSONAS.map((p) => new PersonaAgent(this.client, this.model, p));
-    const finalReportAgent = new FinalReportAgent(this.client, this.model);
+    const personaAgents = PERSONAS.map((p) => new PersonaAgent(this.provider, p));
+    const finalReportAgent = new FinalReportAgent(this.provider);
 
     const shortLabels = PERSONAS.map((p) => ({ name: p.id, status: 'waiting' as const }));
 
@@ -117,10 +126,7 @@ export class Orchestrator {
         if (result.error) {
           renderer1.updateAgent(agent.agentName, { status: 'error', error: result.error });
         } else {
-          renderer1.updateAgent(agent.agentName, {
-            status: 'done',
-            issueCount: result.issues.length,
-          });
+          renderer1.updateAgent(agent.agentName, { status: 'done', issueCount: result.issues.length });
         }
         return result;
       })
@@ -148,10 +154,7 @@ export class Orchestrator {
         if (result.error) {
           renderer2.updateAgent(agent.agentName, { status: 'error', error: result.error });
         } else {
-          const n =
-            result.agreements.length +
-            result.disagreements.length +
-            result.additionalFindings.length;
+          const n = result.agreements.length + result.disagreements.length + result.additionalFindings.length;
           renderer2.updateAgent(agent.agentName, { status: 'done', issueCount: n });
         }
         return result;
@@ -167,11 +170,6 @@ export class Orchestrator {
     const finalReport = await finalReportAgent.build(round1, round2, resolvedPath);
     renderer2.printFinalReport(finalReport);
 
-    return {
-      file: resolvedPath,
-      round1,
-      round2,
-      finalReport,
-    };
+    return { file: resolvedPath, round1, round2, finalReport };
   }
 }

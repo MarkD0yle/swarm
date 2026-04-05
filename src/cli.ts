@@ -26,67 +26,108 @@ if (fs.existsSync(envPath)) {
   }
 }
 
+/** Detect provider from key prefix; Anthropic keys start with sk-ant-. */
+function detectProviderFromKey(key: string): 'openai' | 'anthropic' {
+  return key.trim().startsWith('sk-ant-') ? 'anthropic' : 'openai';
+}
+
 const program = new Command();
 
 program
-  .name('swarm')
-  .description('Multi-agent UI code review tool')
-  .version('1.0.0');
+  .name('swarmui')
+  .description('Multi-agent UI code review tool — powered by OpenAI or Anthropic')
+  .version('1.1.0');
 
 program
   .command('review <file>')
-  .description('Run a multi-agent review on a UI component file or screenshot (.png, .jpg, .webp, .gif)')
-  .option('--api-key <key>', 'OpenAI API key (overrides OPENAI_API_KEY env var)')
-  .option('--model <model>', 'OpenAI model to use', 'gpt-4o')
+  .description(
+    'Run a multi-agent review on a UI component file or screenshot (.png, .jpg, .webp, .gif)'
+  )
+  .option('--api-key <key>', 'API key (overrides OPENAI_API_KEY / ANTHROPIC_API_KEY env vars)')
+  .option(
+    '--provider <name>',
+    'LLM provider: openai or anthropic (auto-detected from key prefix if omitted)'
+  )
+  .option('--model <model>', 'Model to use (defaults: gpt-4o for OpenAI, claude-sonnet-4-6 for Anthropic)')
   .option('--out <path>', 'Write final report as Markdown to this path')
-  .action(async (file: string, options: { apiKey?: string; model?: string; out?: string }) => {
-    const rawKey = options.apiKey ?? process.env['OPENAI_API_KEY'];
-    const apiKey = typeof rawKey === 'string' ? rawKey.trim() : rawKey;
-
-    if (!apiKey) {
-      console.error(
-        '\nError: No OpenAI API key found.\n' +
-        'Set OPENAI_API_KEY in your environment, create a .env file, or pass --api-key.\n'
-      );
-      process.exit(1);
-    }
-
-    const resolvedFile = path.resolve(process.cwd(), file);
-    if (!fs.existsSync(resolvedFile)) {
-      console.error(`\nError: File not found: ${resolvedFile}\n`);
-      process.exit(1);
-    }
-
-    const orchestrator = new Orchestrator({
-      apiKey,
-      model: options.model ?? 'gpt-4o',
-    });
-
-    try {
-      const result = await orchestrator.review(resolvedFile);
-
-      if (options.out) {
-        const md = finalReportToMarkdown(
-          result.file,
-          result.round1,
-          result.round2,
-          result.finalReport
-        );
-        writeReportFile(options.out, md);
-        console.log(`\nReport written to ${path.resolve(options.out)}\n`);
+  .action(
+    async (
+      file: string,
+      options: {
+        apiKey?: string;
+        provider?: string;
+        model?: string;
+        out?: string;
+      }
+    ) => {
+      // Resolve API key: flag → env (ANTHROPIC first if provider flag set, else try both)
+      let rawKey = options.apiKey;
+      if (!rawKey) {
+        const explicitProvider = options.provider?.toLowerCase();
+        if (explicitProvider === 'anthropic') {
+          rawKey = process.env['ANTHROPIC_API_KEY'];
+        } else if (explicitProvider === 'openai') {
+          rawKey = process.env['OPENAI_API_KEY'];
+        } else {
+          // No explicit provider: prefer whichever env var is set; Anthropic takes priority
+          rawKey = process.env['ANTHROPIC_API_KEY'] ?? process.env['OPENAI_API_KEY'];
+        }
       }
 
-      process.exit(0);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`\nError: ${redactApiKeyFromText(message)}\n`);
-      process.exit(1);
+      const apiKey = typeof rawKey === 'string' ? rawKey.trim() : undefined;
+
+      if (!apiKey) {
+        console.error(
+          '\nError: No API key found.\n' +
+            'Set ANTHROPIC_API_KEY or OPENAI_API_KEY in your environment, create a .env file,\n' +
+            'or pass --api-key.\n'
+        );
+        process.exit(1);
+      }
+
+      // Validate --provider flag value
+      const providerFlag = options.provider?.toLowerCase();
+      if (providerFlag && providerFlag !== 'openai' && providerFlag !== 'anthropic') {
+        console.error(`\nError: --provider must be "openai" or "anthropic", got "${options.provider}".\n`);
+        process.exit(1);
+      }
+
+      const provider =
+        (providerFlag as 'openai' | 'anthropic' | undefined) ?? detectProviderFromKey(apiKey);
+
+      const resolvedFile = path.resolve(process.cwd(), file);
+      if (!fs.existsSync(resolvedFile)) {
+        console.error(`\nError: File not found: ${resolvedFile}\n`);
+        process.exit(1);
+      }
+
+      const orchestrator = new Orchestrator({ apiKey, provider, model: options.model });
+
+      try {
+        const result = await orchestrator.review(resolvedFile);
+
+        if (options.out) {
+          const md = finalReportToMarkdown(
+            result.file,
+            result.round1,
+            result.round2,
+            result.finalReport
+          );
+          writeReportFile(options.out, md);
+          console.log(`\nReport written to ${path.resolve(options.out)}\n`);
+        }
+
+        process.exit(0);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`\nError: ${redactApiKeyFromText(message)}\n`);
+        process.exit(1);
+      }
     }
-  });
+  );
 
 program.parse(process.argv);
 
-// Show help if no command given
 if (process.argv.length < 3) {
   program.help();
 }

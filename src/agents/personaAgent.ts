@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import { LLMProvider } from '../provider';
 import { AgentResult, Issue, Round2Result } from '../types';
 import { PersonaDefinition, getPersonaReviewSystemPrompt, getPersonaRound2SystemPrompt } from './personas';
 import { BaseAgent } from './base';
@@ -8,8 +8,8 @@ export class PersonaAgent extends BaseAgent {
   readonly agentName: string;
   private readonly persona: PersonaDefinition;
 
-  constructor(client: OpenAI, model: string, persona: PersonaDefinition) {
-    super(client, model);
+  constructor(provider: LLMProvider, persona: PersonaDefinition) {
+    super(provider);
     this.persona = persona;
     this.agentName = persona.id;
   }
@@ -19,7 +19,7 @@ export class PersonaAgent extends BaseAgent {
   }
 
   async reactRound2(ownRound1: AgentResult, peerDigestText: string): Promise<Round2Result> {
-    const systemPrompt = getPersonaRound2SystemPrompt(this.persona);
+    const system = getPersonaRound2SystemPrompt(this.persona);
 
     const ownIssuesText =
       ownRound1.error != null
@@ -41,20 +41,8 @@ ${peerDigestText}
 Return ONLY the JSON object specified in your instructions.`;
 
     try {
-      const response = await this.client.chat.completions.create({
-        model: this.model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userMessage },
-        ],
-        temperature: 0.2,
-        response_format: { type: 'json_object' },
-      });
-
-      const content =
-        response.choices[0]?.message?.content ??
-        '{"agreements":[],"disagreements":[],"additionalFindings":[],"voiceNote":""}';
-      const parsed = JSON.parse(content) as {
+      const raw = await this.provider.complete(system, userMessage);
+      const parsed = JSON.parse(raw) as {
         agreements?: Array<{ withPersonaId: string; aboutTitle: string; comment: string }>;
         disagreements?: Array<{ withPersonaId: string; aboutTitle: string; reason: string }>;
         additionalFindings?: Issue[];
